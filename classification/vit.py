@@ -131,27 +131,26 @@ class DWA_Block(nn.Module):
         super().__init__()
         self.current_block_num = current_block_num
         self.past_reps = past_reps
-        self.DWA_mat = DWA_mat
+        # self.DWA_mat = DWA_mat
         self.dilation_factor = dilation_factor
 
-    def calc_DWA(self):
+    def calc_DWA(self, dwa_mat):
         weighted_reps = []
         
         #TODO optimize the snippet
         for prev_block_num in range(self.current_block_num):
             if prev_block_num%self.dilation_factor == 0:
                 representation = self.past_reps[prev_block_num]
-                alpha = self.DWA_mat[self.current_block_num][prev_block_num]
+                alpha = dwa_mat[self.current_block_num][prev_block_num]
                 weighted_reps.append( alpha * representation)
         
         dwa = torch.sum(torch.stack(weighted_reps), dim=0)
-
         return dwa
         
-    def forward(self, x):
-        alpha = self.DWA_mat[self.current_block_num][self.current_block_num]
-        x = alpha*x + self.calc_DWA()   
-        return x
+    def forward(self, x : torch.Tensor, dwa_mat : torch.T) -> torch.Tensor: 
+        alpha = dwa_mat[self.current_block_num][self.current_block_num]
+        x = alpha*x + self.calc_DWA(dwa_mat)   
+        return x, dwa_mat
 
 
 
@@ -472,8 +471,10 @@ class VisionTransformer(nn.Module):
             act_layer: Optional[LayerType] = None,
             block_fn: Type[nn.Module] = Block,
             mlp_layer: Type[nn.Module] = Mlp,
+            dwa_fn : Type[nn.Module] = DWA_Block,
             # DWA: bool = False, 
-            DWA_dilation_factor: int = None, #Depth-Weighted-Average -> DenseFormer
+            dwa_dilation_factor: int = None, #Depth-Weighted-Average -> DenseFormer
+            
     ) -> None:
         """
         Args:
@@ -509,6 +510,7 @@ class VisionTransformer(nn.Module):
         norm_layer = get_norm_layer(norm_layer) or partial(nn.LayerNorm, eps=1e-6)
         act_layer = get_act_layer(act_layer) or nn.GELU
 
+        self.depth = depth
         self.num_classes = num_classes
         self.global_pool = global_pool
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
@@ -549,10 +551,61 @@ class VisionTransformer(nn.Module):
             self.patch_drop = nn.Identity()
         self.norm_pre = norm_layer(embed_dim) if pre_norm else nn.Identity()
 
-        if DWA_dilation_factor != None:
-            self.DWA_mat = nn.Parameter(torch.eye(depth))  # set all diagonals to 1 and rest to 0
+        if dwa_dilation_factor != None:
+            self.dilation_factor = dwa_dilation_factor
+            ''' 
+                DWA blocks = depth 
+                Attention blocks = depth+1
+            '''
+            self.DWA_mat = nn.Parameter(torch.eye(depth, depth+1))  # set all diagonals to 1 and rest to 0 
+            self.prev_reps = [ torch.zeros((1, embed_dim, embed_dim)) for _ in range(depth) ]
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        self.dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+
+        self.block = Block(dim=embed_dim,
+                        num_heads=num_heads,
+                        mlp_ratio=mlp_ratio,
+                        qkv_bias=qkv_bias,
+                        qk_norm=qk_norm,
+                        init_values=init_values,
+                        proj_drop=proj_drop_rate,
+                        attn_drop=attn_drop_rate,
+                        drop_path=None,
+                        norm_layer=norm_layer,
+                        act_layer=act_layer,
+                        mlp_layer=mlp_layer,)
+
+        '''
+        layers = []
+        for i in range(depth):
+            if (dwa_dilation_factor != None) and (i % dwa_dilation_factor==0) and (i != 0):
+                layers.append(dwa_fn(
+                    current_block_num = i,
+                    past_reps = self.prev_reps, # Representations from previous layers
+                    DWA_mat = self.DWA_mat,
+                    dilation_factor = dwa_dilation_factor
+
+                )
+                )
+
+            layers.append(block_fn(
+                            dim=embed_dim,
+                            num_heads=num_heads,
+                            mlp_ratio=mlp_ratio,
+                            qkv_bias=qkv_bias,
+                            qk_norm=qk_norm,
+                            init_values=init_values,
+                            proj_drop=proj_drop_rate,
+                            attn_drop=attn_drop_rate,
+                            drop_path=dpr[i],
+                            norm_layer=norm_layer,
+                            act_layer=act_layer,
+                            mlp_layer=mlp_layer,
+                        )
+                        )
+
+
+
         self.blocks = nn.Sequential(*[
             block_fn(
                 dim=embed_dim,
@@ -569,6 +622,8 @@ class VisionTransformer(nn.Module):
                 mlp_layer=mlp_layer,
             )
             for i in range(depth)])
+        '''
+
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
 
         # Classifier Head
@@ -629,9 +684,23 @@ class VisionTransformer(nn.Module):
         x = self.patch_drop(x)
         x = self.norm_pre(x)
         if self.grad_checkpointing and not torch.jit.is_scripting():
-            x = checkpoint_seq(self.blocks, x)
+            for i in range(self.depth):
+                self.block.drop_path = self.dpr[i]
+                x = checkpoint_seq(self.block, x)
         else:
-            x = self.blocks(x)
+            for i in range(self.depth):
+                if (self.dilation_factor != None) and (i % self.dilation_factor==0) and (i != 0):
+                    dwa = DWA_Block( current_block_num = i,
+                                    past_reps = self.prev_reps, # Representations from previous layers
+                                    # DWA_mat = self.DWA_mat,
+                                    dilation_factor = self.dilation_factor)
+                    
+                    x, self.DWA_mat = dwa(x, self.DWA_mat)
+                    
+                self.block.drop_path = self.dpr[i]
+                x = self.block(x)
+                self.prev_reps[i] = x
+
         x = self.norm(x)
         return x
 
