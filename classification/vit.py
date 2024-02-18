@@ -114,6 +114,46 @@ class LayerScale(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.mul_(self.gamma) if self.inplace else x * self.gamma
 
+class DWA_Block(nn.Module):
+    '''
+    init a matrix
+    initialize dilated step count
+    maintain a list which holds representations from intermediate layers 
+    take the block number of the previous layer
+
+    '''
+    def __init__(self,
+                current_block_num : int,
+                past_reps : List, # Representations from previous layers
+                DWA_mat: torch.Tensor,
+                dilation_factor: int = 1
+                ) -> None:
+        super().__init__()
+        self.current_block_num = current_block_num
+        self.past_reps = past_reps
+        self.DWA_mat = DWA_mat
+        self.dilation_factor = dilation_factor
+
+    def calc_DWA(self):
+        weighted_reps = []
+        
+        #TODO optimize the snippet
+        for prev_block_num in range(self.current_block_num):
+            if prev_block_num%self.dilation_factor == 0:
+                representation = self.past_reps[prev_block_num]
+                alpha = self.DWA_mat[self.current_block_num][prev_block_num]
+                weighted_reps.append( alpha * representation)
+        
+        dwa = torch.sum(torch.stack(weighted_reps), dim=0)
+
+        return dwa
+        
+    def forward(self, x):
+        alpha = self.DWA_mat[self.current_block_num][self.current_block_num]
+        x = alpha*x + self.calc_DWA()   
+        return x
+
+
 
 class Block(nn.Module):
     def __init__(
@@ -432,6 +472,8 @@ class VisionTransformer(nn.Module):
             act_layer: Optional[LayerType] = None,
             block_fn: Type[nn.Module] = Block,
             mlp_layer: Type[nn.Module] = Mlp,
+            # DWA: bool = False, 
+            DWA_dilation_factor: int = None, #Depth-Weighted-Average -> DenseFormer
     ) -> None:
         """
         Args:
@@ -506,6 +548,9 @@ class VisionTransformer(nn.Module):
         else:
             self.patch_drop = nn.Identity()
         self.norm_pre = norm_layer(embed_dim) if pre_norm else nn.Identity()
+
+        if DWA_dilation_factor != None:
+            self.DWA_mat = nn.Parameter(torch.eye(depth))  # set all diagonals to 1 and rest to 0
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.Sequential(*[
