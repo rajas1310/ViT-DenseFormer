@@ -125,7 +125,7 @@ class DWA_Block(nn.Module):
     def __init__(self,
                 current_block_num : int,
                 past_reps : List, # Representations from previous layers
-                DWA_mat: torch.Tensor,
+                # DWA_mat: torch.Tensor,
                 dilation_factor: int = 1
                 ) -> None:
         super().__init__()
@@ -147,7 +147,7 @@ class DWA_Block(nn.Module):
         dwa = torch.sum(torch.stack(weighted_reps), dim=0)
         return dwa
         
-    def forward(self, x : torch.Tensor, dwa_mat : torch.T) -> torch.Tensor: 
+    def forward(self, x : torch.Tensor, dwa_mat : torch.Tensor) -> torch.Tensor: 
         alpha = dwa_mat[self.current_block_num][self.current_block_num]
         x = alpha*x + self.calc_DWA(dwa_mat)   
         return x, dwa_mat
@@ -561,19 +561,22 @@ class VisionTransformer(nn.Module):
             self.prev_reps = [ torch.zeros((1, embed_dim, embed_dim)) for _ in range(depth) ]
 
         self.dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        # print(self.dpr)
 
-        self.block = Block(dim=embed_dim,
-                        num_heads=num_heads,
-                        mlp_ratio=mlp_ratio,
-                        qkv_bias=qkv_bias,
-                        qk_norm=qk_norm,
-                        init_values=init_values,
-                        proj_drop=proj_drop_rate,
-                        attn_drop=attn_drop_rate,
-                        drop_path=None,
-                        norm_layer=norm_layer,
-                        act_layer=act_layer,
-                        mlp_layer=mlp_layer,)
+        self.blocks = []
+        for i in range(depth):
+            self.blocks.append (Block(dim=embed_dim,
+                            num_heads=num_heads,
+                            mlp_ratio=mlp_ratio,
+                            qkv_bias=qkv_bias,
+                            qk_norm=qk_norm,
+                            init_values=init_values,
+                            proj_drop=proj_drop_rate,
+                            attn_drop=attn_drop_rate,
+                            drop_path=self.dpr[i],
+                            norm_layer=norm_layer,
+                            act_layer=act_layer,
+                            mlp_layer=mlp_layer,))
 
         '''
         layers = []
@@ -685,8 +688,9 @@ class VisionTransformer(nn.Module):
         x = self.norm_pre(x)
         if self.grad_checkpointing and not torch.jit.is_scripting():
             for i in range(self.depth):
-                self.block.drop_path = self.dpr[i]
-                x = checkpoint_seq(self.block, x)
+                print("in")
+                # self.block.drop_path = self.dpr[i]
+                x = checkpoint_seq(self.blocks[i], x)
         else:
             for i in range(self.depth):
                 if (self.dilation_factor != None) and (i % self.dilation_factor==0) and (i != 0):
@@ -697,8 +701,8 @@ class VisionTransformer(nn.Module):
                     
                     x, self.DWA_mat = dwa(x, self.DWA_mat)
                     
-                self.block.drop_path = self.dpr[i]
-                x = self.block(x)
+                # self.block.drop_path = self.dpr[i]
+                x = self.blocks[i](x)
                 self.prev_reps[i] = x
 
         x = self.norm(x)
