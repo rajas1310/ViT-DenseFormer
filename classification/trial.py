@@ -1,8 +1,14 @@
-from vit import *
+from vit import VisionTransformer
 import torch
 import time
+from timm.models import build_model_with_cfg
 
-model = vit_base_patch8_224(dwa_dilation_factor=1, drop_path_rate=0.1)
+model = build_model_with_cfg(VisionTransformer,
+        'vit_base_patch16_224', 
+        pretrained=False,
+        dwa_dilation_factor=1, 
+        drop_path_rate=0.1,
+        num_classes=10)
 
 batch = torch.randn((1,3,224,224))
 label = torch.Tensor([0])
@@ -12,7 +18,6 @@ start = time.time()
 output = model(batch)
 end = time.time()
 print("Duration: ", end-start)
-
 
 batch = torch.randn((5,3,224,224))
 label = torch.Tensor([0])
