@@ -1,21 +1,20 @@
-from vit import VisionTransformer
+from vit import _create_vision_transformer
 import torch
 import time
 from timm.models import build_model_with_cfg
 
 
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-model = build_model_with_cfg(VisionTransformer,
+model = _create_vision_transformer(
         'vit_base_patch16_224', 
-        pretrained=False,
         dwa_dilation_factor=1, 
         drop_path_rate=0.1,
-        num_classes=10)
+        num_classes=10).to(device)
 
-model = model.cuda()
+# model = model.cuda()
 
-batch = torch.randn((1,3,224,224)).cuda()
+batch = torch.randn((1,3,224,224)).to(device)
 print("Shape : ", batch.shape)
 
 start = time.time()

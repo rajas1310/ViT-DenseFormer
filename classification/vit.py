@@ -133,22 +133,27 @@ class DWA_Block(nn.Module):
         self.past_reps = past_reps
         # self.DWA_mat = DWA_mat
         self.dilation_factor = dilation_factor
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    def calc_DWA(self, dwa_mat):
+    def calc_DWA(self, dwa_mat :torch.Tensor):
         weighted_reps = []
         
         #TODO optimize the snippet
         for prev_block_num in range(self.current_block_num):
             if prev_block_num%self.dilation_factor == 0:
-                representation = self.past_reps[prev_block_num]
+                representation = self.past_reps[prev_block_num].to(self.device)
+                print("rep: ", representation.shape)
                 alpha = dwa_mat[self.current_block_num][prev_block_num]
                 weighted_reps.append( alpha * representation)
         
         dwa = torch.sum(torch.stack(weighted_reps), dim=0)
+        print("wtd_rep: ", weighted_reps[0].shape)
+        print("dwa: ", dwa.shape)
         return dwa
         
     def forward(self, x : torch.Tensor, dwa_mat : torch.Tensor) -> torch.Tensor: 
         alpha = dwa_mat[self.current_block_num][self.current_block_num]
+        print("x: ",x.shape, "\tdwa_mat: ", dwa_mat.shape)
         x = alpha*x + self.calc_DWA(dwa_mat)   
         return x, dwa_mat
 
@@ -471,8 +476,6 @@ class VisionTransformer(nn.Module):
             act_layer: Optional[LayerType] = None,
             block_fn: Type[nn.Module] = Block,
             mlp_layer: Type[nn.Module] = Mlp,
-            dwa_fn : Type[nn.Module] = DWA_Block,
-            # DWA: bool = False, 
             dwa_dilation_factor: int = None, #Depth-Weighted-Average -> DenseFormer
             
     ) -> None:
@@ -522,6 +525,8 @@ class VisionTransformer(nn.Module):
         self.dynamic_img_size = dynamic_img_size
         self.grad_checkpointing = False
 
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
         embed_args = {}
         if dynamic_img_size:
             # flatten deferred until after pos embed
@@ -551,13 +556,14 @@ class VisionTransformer(nn.Module):
             self.patch_drop = nn.Identity()
         self.norm_pre = norm_layer(embed_dim) if pre_norm else nn.Identity()
 
+        self.dilation_factor = dwa_dilation_factor
+
         if dwa_dilation_factor != None:
-            self.dilation_factor = dwa_dilation_factor
             ''' 
                 DWA blocks = depth 
                 Attention blocks = depth+1
             '''
-            self.DWA_mat = nn.Parameter(torch.eye(depth, depth+1))  # set all diagonals to 1 and rest to 0 
+            self.DWA_mat = nn.Parameter(torch.eye(depth, depth+1).to(self.device))  # set all diagonals to 1 and rest to 0 
             self.prev_reps = [ torch.zeros((1, embed_dim, embed_dim)) for _ in range(depth) ]
 
         self.dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -576,7 +582,7 @@ class VisionTransformer(nn.Module):
                             drop_path=self.dpr[i],
                             norm_layer=norm_layer,
                             act_layer=act_layer,
-                            mlp_layer=mlp_layer,))
+                            mlp_layer=mlp_layer).to(self.device))
 
         '''
         self.blocks = nn.Sequential(*[
@@ -662,17 +668,20 @@ class VisionTransformer(nn.Module):
                 x = checkpoint_seq(self.blocks[i], x)
         else:
             for i in range(self.depth):
+                print("Block ", i)
                 if (self.dilation_factor != None) and (i % self.dilation_factor==0) and (i != 0):
                     dwa = DWA_Block( current_block_num = i,
                                     past_reps = self.prev_reps, # Representations from previous layers
                                     # DWA_mat = self.DWA_mat,
-                                    dilation_factor = self.dilation_factor)
+                                    dilation_factor = self.dilation_factor).to(self.device)
                     print("DWA:-\n",self.DWA_mat)
                     x, self.DWA_mat = dwa(x, self.DWA_mat)
                     
-                # self.block.drop_path = self.dpr[i]
-                x = self.blocks[i](x)
-                self.prev_reps[i] = x
+                    # self.block.drop_path = self.dpr[i]
+                    x = self.blocks[i](x)
+                    self.prev_reps[i] = x
+                else:
+                    x = self.blocks[i](x)
 
         x = self.norm(x)
         return x
