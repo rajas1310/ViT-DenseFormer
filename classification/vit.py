@@ -202,6 +202,7 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
+        print("Block out: ", x.shape)
         return x
 
 
@@ -564,7 +565,7 @@ class VisionTransformer(nn.Module):
                 Attention blocks = depth+1
             '''
             self.DWA_mat = nn.Parameter(torch.eye(depth, depth+1).to(self.device))  # set all diagonals to 1 and rest to 0 
-            self.prev_reps = [ torch.zeros((1, embed_dim, embed_dim)) for _ in range(depth) ]
+            self.prev_reps = [ torch.zeros((1, 1+(img_size[0]//patch_size)**2, embed_dim)) for _ in range(depth) ]
 
         self.dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         # print(self.dpr)
@@ -668,19 +669,21 @@ class VisionTransformer(nn.Module):
                 x = checkpoint_seq(self.blocks[i], x)
         else:
             for i in range(self.depth):
-                print("Block ", i)
+                print("DWA ", i)
                 if (self.dilation_factor != None) and (i % self.dilation_factor==0) and (i != 0):
                     dwa = DWA_Block( current_block_num = i,
                                     past_reps = self.prev_reps, # Representations from previous layers
                                     # DWA_mat = self.DWA_mat,
                                     dilation_factor = self.dilation_factor).to(self.device)
-                    print("DWA:-\n",self.DWA_mat)
+                    # print("DWA_mat:-\n",self.DWA_mat)
                     x, self.DWA_mat = dwa(x, self.DWA_mat)
-                    
+
+                    print("Block ", i)
                     # self.block.drop_path = self.dpr[i]
                     x = self.blocks[i](x)
                     self.prev_reps[i] = x
                 else:
+                    print("Block ", i)
                     x = self.blocks[i](x)
 
         x = self.norm(x)

@@ -8,7 +8,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 model = _create_vision_transformer(
         'vit_base_patch16_224', 
-        dwa_dilation_factor=1, 
+        dwa_dilation_factor=4, 
         drop_path_rate=0.1,
         num_classes=10).to(device)
 
