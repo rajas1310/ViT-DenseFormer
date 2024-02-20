@@ -7,6 +7,7 @@ wandb/
 *.jpeg
 *.pt
 *.zip
+rough*.py
 
 # VSCode
 .vscode/
