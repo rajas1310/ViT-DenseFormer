@@ -140,20 +140,20 @@ class DWA_Block(nn.Module):
         
         #TODO optimize the snippet
         for prev_block_num in range(self.current_block_num):
-            if prev_block_num%self.dilation_factor == 0:
-                representation = self.past_reps[prev_block_num].to(self.device)
-                print("rep: ", representation.shape)
-                alpha = dwa_mat[self.current_block_num][prev_block_num]
-                weighted_reps.append( alpha * representation)
+            # if prev_block_num%self.dilation_factor == 0:
+            representation = self.past_reps[prev_block_num].to(self.device)
+            # print("rep: ", representation.shape)
+            alpha = dwa_mat[self.current_block_num][prev_block_num]
+            weighted_reps.append( alpha * representation)
         
         dwa = torch.sum(torch.stack(weighted_reps), dim=0)
-        print("wtd_rep: ", weighted_reps[0].shape)
-        print("dwa: ", dwa.shape)
+        # print("wtd_rep: ", weighted_reps[0].shape)
+        # print("dwa: ", dwa.shape)
         return dwa
         
     def forward(self, x : torch.Tensor, dwa_mat : torch.Tensor) -> torch.Tensor: 
         alpha = dwa_mat[self.current_block_num][self.current_block_num]
-        print("x: ",x.shape, "\tdwa_mat: ", dwa_mat.shape)
+        # print("x: ",x.shape, "\tdwa_mat: ", dwa_mat.shape)
         x = alpha*x + self.calc_DWA(dwa_mat)   
         return x, dwa_mat
 
@@ -202,7 +202,7 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
-        print("Block out: ", x.shape)
+        print("Block out: ", x.shape, '\n')
         return x
 
 
@@ -564,6 +564,7 @@ class VisionTransformer(nn.Module):
                 DWA blocks = depth 
                 Attention blocks = depth+1
             '''
+            self.dwa_module_indices = [i for i in range(1, depth, dwa_dilation_factor)]
             self.DWA_mat = nn.Parameter(torch.eye(depth, depth+1).to(self.device))  # set all diagonals to 1 and rest to 0 
             self.prev_reps = [ torch.zeros((1, 1+(img_size[0]//patch_size)**2, embed_dim)) for _ in range(depth) ]
 
@@ -669,17 +670,17 @@ class VisionTransformer(nn.Module):
                 x = checkpoint_seq(self.blocks[i], x)
         else:
             for i in range(self.depth):
-                print("DWA ", i)
-                if (self.dilation_factor != None) and (i % self.dilation_factor==0) and (i != 0):
-                    dwa = DWA_Block( current_block_num = i,
-                                    past_reps = self.prev_reps, # Representations from previous layers
-                                    # DWA_mat = self.DWA_mat,
-                                    dilation_factor = self.dilation_factor).to(self.device)
-                    # print("DWA_mat:-\n",self.DWA_mat)
-                    x, self.DWA_mat = dwa(x, self.DWA_mat)
+                if (self.dilation_factor != None):
+                    if (i in self.dwa_module_indices) and (i != 0):
+                        print("DWA ", i)
+                        dwa = DWA_Block( current_block_num = i,
+                                        past_reps = self.prev_reps, # Representations from previous layers
+                                        # DWA_mat = self.DWA_mat,
+                                        dilation_factor = self.dilation_factor).to(self.device)
+                        # print("DWA_mat:-\n",self.DWA_mat)
+                        x, self.DWA_mat = dwa(x, self.DWA_mat)
 
                     print("Block ", i)
-                    # self.block.drop_path = self.dpr[i]
                     x = self.blocks[i](x)
                     self.prev_reps[i] = x
                 else:
