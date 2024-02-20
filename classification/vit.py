@@ -579,36 +579,6 @@ class VisionTransformer(nn.Module):
                             mlp_layer=mlp_layer,))
 
         '''
-        layers = []
-        for i in range(depth):
-            if (dwa_dilation_factor != None) and (i % dwa_dilation_factor==0) and (i != 0):
-                layers.append(dwa_fn(
-                    current_block_num = i,
-                    past_reps = self.prev_reps, # Representations from previous layers
-                    DWA_mat = self.DWA_mat,
-                    dilation_factor = dwa_dilation_factor
-
-                )
-                )
-
-            layers.append(block_fn(
-                            dim=embed_dim,
-                            num_heads=num_heads,
-                            mlp_ratio=mlp_ratio,
-                            qkv_bias=qkv_bias,
-                            qk_norm=qk_norm,
-                            init_values=init_values,
-                            proj_drop=proj_drop_rate,
-                            attn_drop=attn_drop_rate,
-                            drop_path=dpr[i],
-                            norm_layer=norm_layer,
-                            act_layer=act_layer,
-                            mlp_layer=mlp_layer,
-                        )
-                        )
-
-
-
         self.blocks = nn.Sequential(*[
             block_fn(
                 dim=embed_dim,
@@ -688,7 +658,6 @@ class VisionTransformer(nn.Module):
         x = self.norm_pre(x)
         if self.grad_checkpointing and not torch.jit.is_scripting():
             for i in range(self.depth):
-                print("in")
                 # self.block.drop_path = self.dpr[i]
                 x = checkpoint_seq(self.blocks[i], x)
         else:
@@ -698,7 +667,7 @@ class VisionTransformer(nn.Module):
                                     past_reps = self.prev_reps, # Representations from previous layers
                                     # DWA_mat = self.DWA_mat,
                                     dilation_factor = self.dilation_factor)
-                    
+                    print("DWA:-\n",self.DWA_mat)
                     x, self.DWA_mat = dwa(x, self.DWA_mat)
                     
                 # self.block.drop_path = self.dpr[i]
