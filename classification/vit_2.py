@@ -175,6 +175,7 @@ class Block(nn.Module):
             act_layer: nn.Module = nn.GELU,
             norm_layer: nn.Module = nn.LayerNorm,
             mlp_layer: nn.Module = Mlp,
+            # dwa_args: dict = None
     ) -> None:
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -309,7 +310,7 @@ class VisionTransformer(nn.Module):
         self.grad_checkpointing = False
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        # print("Inside DenseFormer")
+        print("Inside DenseFormer2")
 
         embed_args = {}
         if dynamic_img_size:
@@ -353,6 +354,9 @@ class VisionTransformer(nn.Module):
 
         self.dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         # print(self.dpr)
+
+
+
 
         self.blocks = []
         for i in range(depth):
@@ -470,7 +474,7 @@ class VisionTransformer(nn.Module):
                                         # DWA_mat = self.DWA_mat,
                                         # dilation_factor = self.dilation_factor
                                         ).to(self.device)
-                        # print("DWA_mat:-\n",self.DWA_mat)
+                        print("DWA_mat:-\n",self.DWA_mat)
                         x, self.DWA_mat = dwa(x, self.DWA_mat)
 
                     print("Block ", i)
