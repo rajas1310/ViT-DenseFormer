@@ -72,8 +72,8 @@ for i in range(5000):
 
 for epoch in range(num_epochs):
     for batch in tqdm(dataloader):
-        imgs = batch[0]
-        labels = batch[1]
+        imgs = batch[0].to(device)
+        labels = batch[1].to(device)
         scores = model(imgs)
         loss = criterion(scores, labels)
         optim.zero_grad()
