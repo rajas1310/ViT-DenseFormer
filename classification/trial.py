@@ -8,8 +8,8 @@ import random
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 nc = 3
-b_size = 16
-num_epochs = 1
+b_size = 8
+num_epochs = 50
 
 """model = _create_vision_transformer(
         'vit_base_patch16_224', 
@@ -28,7 +28,7 @@ print("INFO: Base-ViT:", base_total_params, "trainable parameters")
 model = create_model(
         'vit_base_patch16_224',
         pretrained=True, 
-        dwa_dilation_factor=2, 
+        dwa_dilation_factor=1, 
         drop_path_rate=0.1,
         num_classes=nc).to(device) 
 
@@ -65,7 +65,7 @@ model.train()
 ''' create random dataloader '''
 dataloader = []
 
-for i in range(5000):
+for i in range(3000):
         labels = torch.tensor([random.choice([class_idx for class_idx in range(nc)]) for _ in range(b_size)])
         batch = (torch.randn(b_size, 3, 224, 224), labels)
         dataloader.append(batch)

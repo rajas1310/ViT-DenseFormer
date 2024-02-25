@@ -204,7 +204,7 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
-        print("Block out: ", x.shape, '\n')
+        # print("Block out: ", x.shape, '\n')
         return x
 
 
@@ -468,20 +468,20 @@ class VisionTransformer(nn.Module):
             for i in range(self.depth):
                 if (self.dilation_factor != None):
                     if (i in self.dwa_module_indices) and (i != 0):
-                        print("DWA ", i)
+                        # print("DWA ", i)
                         dwa = DWA_Block( current_block_num = i,
                                         past_reps = self.prev_reps, # Representations from previous layers
                                         # DWA_mat = self.DWA_mat,
                                         # dilation_factor = self.dilation_factor
                                         ).to(self.device)
-                        print("DWA_mat:-\n",self.DWA_mat)
+                        # print("DWA_mat:-\n",self.DWA_mat)
                         x, self.DWA_mat = dwa(x, self.DWA_mat)
 
-                    print("Block ", i)
+                    # print("Block ", i)
                     x = self.blocks[i](x)
                     self.prev_reps[i] = x
                 else:
-                    print("Block ", i)
+                    # print("Block ", i)
                     x = self.blocks[i](x)
 
         x = self.norm(x)
